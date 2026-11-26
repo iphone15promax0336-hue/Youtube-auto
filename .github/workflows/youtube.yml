@@ -1,0 +1,78 @@
+name: Upload YouTube Video
+​on:
+workflow_dispatch:
+inputs:
+video_url:
+description: "Direct link to the video file"
+required: true
+title:
+description: "YouTube video title"
+required: true
+description:
+description: "YouTube video description"
+required: false
+default: "Uploaded via GitHub Actions"
+privacy_status:
+description: "unlisted, private, or public"
+required: false
+default: "unlisted"
+​jobs:
+upload:
+runs-on: ubuntu-latest
+steps:
+- name: Checkout repository
+uses: actions/checkout@v4
+​- name: Set up Python
+uses: actions/setup-python@v5
+with:
+python-version: "3.11"
+​- name: Install dependencies
+run: pip install google-api-python-client google-auth-oauthlib requests
+​- name: Download video and upload to YouTube
+env:
+YT_CLIENT_ID: ${{ secrets.YT_CLIENT_ID }}
+YT_CLIENT_SECRET: ${{ secrets.YT_CLIENT_SECRET }}
+YT_REFRESH_TOKEN: ${{ secrets.YT_REFRESH_TOKEN }}
+VIDEO_URL: ${{ inputs.video_url }}
+VIDEO_TITLE: ${{ inputs.title }}
+VIDEO_DESC: ${{ inputs.description }}
+VIDEO_PRIVACY: ${{ inputs.privacy_status }}
+run: |
+python - << 'EOF'
+import os, requests
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+​video_path = "video.mp4"
+with requests.get(os.environ["VIDEO_URL"], stream=True, timeout=300) as r:
+r.raise_for_status()
+with open(video_path, "wb") as f:
+for chunk in r.iter_content(chunk_size=1024 * 1024):
+if chunk:
+f.write(chunk)
+​creds = Credentials(
+token=None,
+refresh_token=os.environ["YT_REFRESH_TOKEN"],
+token_uri="https://oauth2.googleapis.com/token",
+client_id=os.environ["YT_CLIENT_ID"],
+client_secret=os.environ["YT_CLIENT_SECRET"],
+scopes=["https://www.googleapis.com/auth/youtube.upload"],
+)
+youtube = build("youtube", "v3", credentials=creds)
+​body = {
+"snippet": {
+"title": os.environ["VIDEO_TITLE"],
+"description": os.environ["VIDEO_DESC"],
+"categoryId": "22",
+},
+"status": {
+"privacyStatus": os.environ["VIDEO_PRIVACY"],
+},
+}
+media = MediaFileUpload(video_path, chunksize=1024 * 1024, resumable=True)
+request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
+response = None
+while response is None:
+_, response = request.next_chunk()
+print("Uploaded video ID:", response.get("id"))
+EOF
